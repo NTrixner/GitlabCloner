@@ -1,4 +1,4 @@
-package org.example;
+package eu.trixner;
 
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.CommandLineParser;
@@ -21,6 +21,68 @@ import java.util.List;
 
 public class Main {
     public static void main(String[] args) {
+        ArgParams params = getParams(args);
+
+        try {
+            // Create a GitLabApi instance to communicate with your GitLab server
+            GitLabApi gitLabApi = new GitLabApi(params.getHost(), params.getToken());
+
+            List<Project> projects = new ArrayList<>();
+            // Get the list of projects your account has access to
+            Group glGroup = gitLabApi.getGroupApi().getGroup(params.getGroupId());
+            getProjectsForGroupRecursive(gitLabApi, glGroup, projects);
+
+            for (Project p : projects) {
+
+                Path path = Path.of(params.getTargetFolder(), p.getNamespace().getPath());
+                System.out.println(path + "\\" + p.getName());
+                File f = new File(path.toUri());
+                if (f.exists() || f.mkdir()) {
+                    ProcessBuilder pb = new ProcessBuilder("git", "clone", p.getSshUrlToRepo());
+                    pb.directory(f);
+                    pb.inheritIO();
+                    Process process = pb.start();
+                    int code = process.waitFor();
+                    if (code != 0) {
+                        throw new InterruptedException("Git clone failed!");
+                    }
+                } else {
+                    throw new FileSystemException("Could not create file");
+                }
+            }
+        } catch (GitLabApiException e) {
+            System.out.println(e.getMessage());
+            System.exit(1);
+        } catch (FileSystemException e) {
+            System.out.println(e.getMessage());
+            System.exit(1);
+        } catch (IOException e) {
+            System.out.println(e.getMessage());
+            System.exit(1);
+        } catch (InterruptedException e) {
+            System.out.println(e.getMessage());
+            System.exit(1);
+        }
+
+
+    }
+
+    private static void getProjectsForGroupRecursive(GitLabApi gitLabApi, Group glGroup, List<Project> projects) throws GitLabApiException {
+        List<Project> projectsGroup = gitLabApi.getGroupApi().getProjects(glGroup.getId());
+        if (projectsGroup != null) {
+            projects.addAll(projectsGroup);
+        }
+        List<Group> subGroups = gitLabApi.getGroupApi().getSubGroups(glGroup.getId());
+        if (subGroups != null) {
+            for (Group g : subGroups) {
+                getProjectsForGroupRecursive(gitLabApi, g, projects);
+            }
+        }
+    }
+
+    private static ArgParams getParams(String[] args) {
+        ArgParams params = new ArgParams();
+
         Options options = new Options();
         Option hostOption = new Option("h", "host", true, "Host URL");
         hostOption.setRequired(false);
@@ -56,66 +118,18 @@ public class Main {
             String token = cmd.getOptionValue("token");
             String group = cmd.getOptionValue("group");
 
-            // Create a GitLabApi instance to communicate with your GitLab server
-            GitLabApi gitLabApi = new GitLabApi(host, token);
+            params.setHost(host);
+            params.setToken(token);
+            params.setTargetFolder(folder);
+            params.setGroupId(group);
 
-            List<Project> projects = new ArrayList<>();
-            // Get the list of projects your account has access to
-            Group glGroup = gitLabApi.getGroupApi().getGroup(group);
-            getProjectsForGroupRecursive(gitLabApi, glGroup, projects);
-
-            for (Project p : projects) {
-
-                Path path = Path.of(folder, p.getNamespace().getPath());
-                System.out.println(path + "\\" + p.getName());
-                File f = new File(path.toUri());
-                if (f.exists() || f.mkdir()) {
-                    ProcessBuilder pb = new ProcessBuilder("git", "clone", p.getSshUrlToRepo());
-                    pb.directory(f);
-                    pb.inheritIO();
-                    Process process = pb.start();
-                    int code = process.waitFor();
-                    if(code != 0)
-                    {
-                        throw new InterruptedException("Git clone failed!");
-                    }
-                } else {
-                    throw new FileSystemException("Could not create file");
-                }
-            }
-
+            return params;
         } catch (ParseException e) {
             System.out.println(e.getMessage());
             formatter.printHelp("utility-name", options);
 
             System.exit(1);
-        } catch (GitLabApiException e) {
-            System.out.println(e.getMessage());
-            System.exit(1);
-        } catch (FileSystemException e) {
-            System.out.println(e.getMessage());
-            System.exit(1);
-        } catch (IOException e) {
-            System.out.println(e.getMessage());
-            System.exit(1);
-        } catch (InterruptedException e) {
-            System.out.println(e.getMessage());
-            System.exit(1);
         }
-
-
-    }
-
-    private static void getProjectsForGroupRecursive(GitLabApi gitLabApi, Group glGroup, List<Project> projects) throws GitLabApiException {
-        List<Project> projectsGroup = gitLabApi.getGroupApi().getProjects(glGroup.getId());
-        if (projectsGroup != null) {
-            projects.addAll(projectsGroup);
-        }
-        List<Group> subGroups = gitLabApi.getGroupApi().getSubGroups(glGroup.getId());
-        if (subGroups != null) {
-            for (Group g : subGroups) {
-                getProjectsForGroupRecursive(gitLabApi, g, projects);
-            }
-        }
+        return null;
     }
 }
